@@ -1,0 +1,192 @@
+---
+title: "Untitled"
+author: "Hurgland-Nick"
+date: "20/11/2019"
+output:
+  pdf_document: default
+  word_document: default
+---
+
+```{r}
+# Lecture du fichier de donnée
+banque_data = read.csv("bank.csv", sep=";") 
+head(banque_data,6)
+```
+
+```{r}
+# Voir les statistiques de la data
+summary(banque_data)
+```
+
+```{r}
+# Visualisation des données
+# X = variable à prédire ie est ce que le client "souscrit" ou "non"
+ library(ggplot2)
+library(plotly)
+g <- ggplot(banque_data, aes(x = y, y = duration, fill = y)) + geom_boxplot()
+ggplotly(g)
+print(g)
+```
+
+
+```{r}
+# On peut voir que plus la durée de l'appel est longue plus ils ont dit 'Yes' donc on souscrit
+# Regardons maintenant si l'âge aussi donne se comportement
+visual_age <- ggplot(banque_data, aes(x = y, y = age, fill = y)) + geom_boxplot()
+ggplotly(visual_age)
+print(visual_age)
+
+```
+
+```{r}
+# Testons maintenat avec une valeur Catégiorielle , ici nous ne pouvons plus utiliser des boxplot() comme ce n'est plus des variables sicrètes
+# On utilisera des barplot
+visual_contact <- ggplot(banque_data, aes(y, fill = contact)) + geom_bar()
+print(visual_contact)
+visual_contact
+```
+
+
+### Création du jeu de données d'entrainement et de test
+
+```{r}
+# Création jeu de test et jeu d'entrainement
+# On utilise caret pour le machine learning
+library(caret)
+
+# Transformer les variables catégorielles en variables numériques
+dummy_variables <- dummyVars(~.,data = banque_data)
+
+# Transferer sur banque_data
+dummy_variables_data = predict(dummy_variables,newdata = banque_data)
+
+
+#☺ Convertir en Dataframe la variable dummy_variables_data
+dummy_variables_data = as.data.frame(dummy_variables_data)
+
+# Créer une colonne No ou yes dans le tableau Souscription
+dummy_variables_data$"Souscription" = ifelse(dummy_variables_data$"y.no" == 1, "No","yes")
+
+# Effaçons les autres colonnes
+dummy_variables_data$"y.no" = NULL
+dummy_variables_data$"y.yes" = NULL
+```
+
+### Création du jeu de données d'entrainement et de test 2
+
+```{r}
+#  Création du jeu de données d'entrainement et de test 2
+#▲ reglage du seed
+set.seed(3033)
+
+# On va créer 70 % de données d'entrainement et 30 % de donnée test
+training_size = floor(0.7*nrow(dummy_variables_data))
+
+indices = sample(seq_len(nrow(dummy_variables_data)), size = training_size)
+
+data_bank.train = dummy_variables_data[indices,]
+data_bank.test = dummy_variables_data[-indices,]
+
+dim(data_bank.train)
+
+# On utilisons Tidyverse
+# train <- banque_data %>% sample_frac(0.7)
+# test <- anti_join(banque_data, train)
+
+```
+
+
+```{r}
+dim(data_bank.test)
+```
+
+# Normalisation des données
+```{r}
+data_preprocess_value = preProcess(data_bank.train, method= c("center","scale"))
+data_bank.train.scaled = predict(data_preprocess_value,data_bank.train)
+data_bank.test.scaled = predict(data_preprocess_value,data_bank.test)
+                                   
+```
+
+# Caret - downsample et upsample
+```{r}
+set.seed(3033)
+# Créer un opérateur
+'%ni%' = Negate("%in%")
+
+# Downsample
+data_bank.test.scaled.downsample = downSample(x = data_bank.train.scaled[,colnames(data_bank.train.scaled) %ni% "Souscription"], y =as.factor(data_bank.train.scaled$"Souscription" ))
+names(data_bank.test.scaled.downsample)[names(data_bank.test.scaled.downsample) == "Class"] = "Souscription"
+table(data_bank.test.scaled.downsample[,"Souscription"])
+```
+
+```{r}
+# Downsample ( juse un copié collé)
+data_bank.test.scaled.upsample = upSample(x = data_bank.train.scaled[,colnames(data_bank.train.scaled) %ni% "Souscription"], y =as.factor(data_bank.train.scaled$"Souscription" ))
+names(data_bank.test.scaled.upsample)[names(data_bank.test.scaled.upsample) == "Class"] = "Souscription"
+table(data_bank.test.scaled.upsample[,"Souscription"])
+
+```
+
+### Naîve Bayes
+```{r}
+# Modélisation avec Naîve Bayes
+# Créer une validation croisé ( Cross Validation)
+# Coupe notre jeux en 10 et sera repté 3 fois
+set.seed(3033)
+trainControl_data = trainControl(method = "repeatedcv", number = 10, repeats = 3)
+naive_bayes_desequilibree=train(Souscription ~., data = data_bank.test.scaled, method ="nb", preProcess=NULL)
+print(naive_bayes_desequilibree)
+```
+
+```{r}
+# Prédiction avec notre modèle sur le jeu de données tests
+prediction_naive_bayes_desequilibree =  predict(naive_bayes_desequilibree, newdata=data_bank.test.scaled[,-ncol(data_bank.test.scaled)])
+
+# Créaction de la matrice de confusion
+confusionMatrix(prediction_naive_bayes_desequilibree, as.factor(data_bank.test.scaled[,ncol(data_bank.test.scaled)]))
+```
+
+```{r}
+# Modélisation avec Naîve Bayes sur les données downsample
+# Testons notre prédiction avec nos données équilibrées
+trainControl_data = trainControl(method = "repeatedcv", number = 10, repeats = 3)
+naive_bayes_downsample=train(Souscription ~., data = data_bank.test.scaled.downsample, method ="nb", preProcess=NULL)
+print(naive_bayes_downsample)
+
+# Prédiction avec notre modèle sur le jeu de données tests
+prediction_naive_bayes_downsample =  predict(naive_bayes_desequilibree, newdata=data_bank.test.scaled[,-ncol(data_bank.test.scaled)])
+
+# Créaction de la matrice de confusion
+confusionMatrix(prediction_naive_bayes_downsample, as.factor(data_bank.test.scaled[,ncol(data_bank.test.scaled)]))
+
+```
+
+
+### Modélisation avec SVM
+```{r}
+set.seed(3033)
+# Le traincontroldata ne change pas
+trainControl_data = trainControl(method = "repeatedcv", number = 10, repeats = 3)
+
+# Ici des changements nouveau nom SVM_desequilibree, method = svmLinear
+SVM_desequilibree=train(Souscription ~., data = data_bank.test.scaled, method ="svmLinear", preProcess=NULL)
+print(SVM_desequilibree)
+
+# Prédiction avec notre modèle sur le jeu de données tests, changement nom de la variable + predict(SVM_desequilibree)
+prediction_SVM_desequilibree =  predict(SVM_desequilibree, newdata=data_bank.test.scaled[,-ncol(data_bank.test.scaled)])
+
+# Créaction de la matrice de confusion
+confusionMatrix(prediction_SVM_desequilibree, as.factor(data_bank.test.scaled[,ncol(data_bank.test.scaled)]))
+```
+
+
+
+```{r}
+
+# Variable qui joue vraiment sur la souscription du Client
+# Variable qui a le plus d'impact sur la souscription d'un client
+# Only possible sur Naîve Bayes et possible sur SVM car il n'y existe pas encore de valeur pour prédire ces variable. varImp
+varImp(naive_bayes_downsample, scale=F)
+```
+
